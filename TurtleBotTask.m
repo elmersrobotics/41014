@@ -1,6 +1,7 @@
 classdef TurtleBotTask < handle
-    %UNTITLED Summary of this class goes here
-    %   Detailed explanation goes here
+   %% Sensors and Control (SPR2022) - Assessment Task 3 
+    % Group Project 7:  Turtlebot robot following each other 
+    % Elmer Junior Caballero, Jithin Abraham, Shayer Shah
     
     properties
        
@@ -9,46 +10,42 @@ classdef TurtleBotTask < handle
     methods
         
         function obj = TurtleBotTask(mode, colour)
-            %% Sensors and Control (SPR2022) - Assessment Task 3 
-            % Group Project 7:  Turtlebot robot following each other 
-            % Elmer Junior Caballero, Jithin Abraham, Shayer Shah
-
-
-            %% SETUP
-            % Connect to virtual machine's ROS master
-
-            rosshutdown; % Shut down any running global ROS entities created by rosinit
-            simulationIP = '192.168.233.132'; % This IP depends on the virtual machine running Gazebo
+            % Function TurtleBotTask:
+            % Main constructor of the TurtleBotTask class
+            % Sets up the MATLAB-ROS connectivity and program parameters
+            % Runs the main program loop
+            
+            %% CONFIGURATION     
+            rosshutdown;
+            simulationIP = '192.168.233.133'; 
             rosinit(simulationIP);
 
-            % Configure ROS subscribers and publishers
-            cameraSubscriber = rossubscriber('/tb3_0/camera/rgb/image_raw'); % Topic for follower turtlebot3 image data
-            receive(cameraSubscriber,10); % Program stalls here until image data from the simulation is received
+            % SETUP ROS SUBSCRIBERS AND PUBLISHERS
+            cameraSubscriber = rossubscriber('/tb3_0/camera/rgb/image_raw');
+            receive(cameraSubscriber,10);
             laserSubscriber = rossubscriber('/tb3_0/scan');
             receive(laserSubscriber,10);
-            [velPub,velMsg] = rospublisher('/tb3_0/cmd_vel'); % Topic for follower turtlebot3 linear/angular velocity
+            [velPub,velMsg] = rospublisher('/tb3_0/cmd_vel');
 
-            % Visualise the follower turtlebot3 camera view
             followerView = vision.DeployableVideoPlayer('Name', 'FollowerView','CustomSize', [640 480]);
-
-            % Load control parameters
-                controlParameters.Ts = 0.1;           % Sample time
-                controlParameters.bufSize = 5;        % Filter buffer size
-                controlParameters.maxDisp = 300;      % Max object displacement [pixels]
-                controlParameters.minSize = 20;       % Min object size [pixels]
-                controlParameters.maxSize = 20000;      % Max object size [pixels]
-                controlParameters.maxCounts = 5;      % Max outlier counts before stopping
-                controlParameters.linVelGain = 2e-3;  % Linear control gain
-                controlParameters.angVelGain =1e-4;  % Angular control gain
-                controlParameters.maxLinVel = 0.26;    % Max linear speed
-                controlParameters.maxAngVel = 0.75;   % Max angular speed
-                controlParameters.posDeadZone = 30;   % Steering control marker position dead zone [pixels] 
-                controlParameters.targetSizeAdv = 2000;
-                controlParameters.targetSizeBas = 300;
-                controlParameters.targetDistance = 0.5;
-                controlParameters.sizeDeadZone = 30;  % Linear speed control size dead zone [pixels]
-                controlParameters.distanceDeadZone = 20;  % Linear speed control size dead zone [pixels]
-                controlParameters.speedRedSize = 100; % Minimum pixel value before turning speed is ramped down
+                
+            % CREATE A STRUCTURE 'controlParameters' WITH TUNED CONTROL SETTINGS
+            controlParameters.Ts = 0.1;           
+            controlParameters.bufSize = 5;      
+            controlParameters.maxDisp = 300;     
+            controlParameters.minSize = 20;      
+            controlParameters.maxSize = 20000;    
+            controlParameters.maxCounts = 5;    
+            controlParameters.linVelGain = 2e-3;  
+            controlParameters.angVelGain = 1e-4;  
+            controlParameters.maxLinVel = 0.26;   
+            controlParameters.maxAngVel = 1;   
+            controlParameters.posDeadZone = 30;   
+            controlParameters.targetSizeAdv = 2000;
+            controlParameters.targetSizeBas = 300;
+            controlParameters.targetDistance = 0.5;
+            controlParameters.sizeDeadZone = 20;  
+            controlParameters.speedRedSize = 100; 
 
                 fig = findall(0,"Name", "MATLAB App");
                 handle = fig.RunningAppInstance;
@@ -56,9 +53,7 @@ classdef TurtleBotTask < handle
                 referenceImg = imread('heart.jpg');
                 disp('Program Started')
                 
-                
-                
-            %% LOOP
+            %% BEGIN MAIN LOOP
             while(1) 
                 
                 drawnow();
@@ -68,13 +63,11 @@ classdef TurtleBotTask < handle
                    break; 
                 end
                 
-                %% SENSE
-                % Grab images
+                %% GATHER DATA FROM SIMULATION
                 followerImg = readImage(cameraSubscriber.LatestMessage);
                 laserScan = laserSubscriber.LatestMessage.Ranges;
 
-                %% PROCESS
-                % Object detection algorithm
+                %% CALL IMAGE PROCESSING FUNCTIONS 
                 resizeScale = 0.5;
                 if mode == 'basic'
                     [centerX,centerY, state, matchSize] = obj.processImageBasic(followerImg,resizeScale, colour);
@@ -83,18 +76,16 @@ classdef TurtleBotTask < handle
                 if mode == 'advanced'
                     [centerX,centerY, state, matchSize] = obj.processImageAdvanced(referenceImg,followerImg,resizeScale);
                 end
-                % Object tracking algorithm
+
                 [v,w] = obj.calculateMovement(centerX, matchSize, laserScan, size(followerImg,2),controlParameters, mode, state);
 
 
-                %% CONTROL
-                % Package ROS message and send to the robot
+                %% CONTROLLING THE SIMULATED TURTLEBOT FOLLOWER
                 velMsg.Linear.X = v;
                 velMsg.Angular.Z = w;
                 send(velPub,velMsg);
 
-                %% VISUALIZE
-                % Annotate image and update the video player
+                %% UPDATE THE CAMERA VIEW OF THE TURTLEBOT FOLLOWER
                  followerImg = insertShape(followerImg,'Circle',[centerX centerY 50],'LineWidth',2);
                  step(followerView,followerImg);
 
@@ -109,7 +100,15 @@ classdef TurtleBotTask < handle
         
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%        
         function [centerX,centerY, state, blobSize] = processImageBasic(img,scale, colour)
-        % Detects circle location and size in image
+            % Function processImageBasic: 
+            % Detects a given colour (RGB) in the camera view and determines
+            % the size of the matched blob and coordinates (x,y) in the frame.
+            % Template used from:   
+            % MathWorks Student Competitions Team (2022). 
+            % Getting Started with MATLAB, Simulink, and ROS 
+            %(https://github.com/mathworks-robotics/getting-started-ros), GitHub. 
+            % Retrieved October 24, 2022.
+        
 
             % Initialize variables
             centerX = 0;
@@ -160,12 +159,12 @@ classdef TurtleBotTask < handle
                             'BoundingBoxOutputPort',false, ...
                             'AreaOutputPort',false, ...
                             'MajorAxisLengthOutputPort', true, ...
-                            'MinimumBlobArea',300, ...
+                            'MinimumBlobArea',controlParameters.targetSizeBas, ...
                             'MaximumCount', 10);
             end
             [centroids,majorAxes] = detector(imgBW);
 
-            % Estimate the blob location and size, if any are large enough
+            % Estimate the blob location and size
             if ~isempty(majorAxes)
 
                 % Find max blob major axis
@@ -191,7 +190,9 @@ classdef TurtleBotTask < handle
         end
  %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%       
         function [centerX,centerY, state, matchSize] = processImageAdvanced(capturedImg, img, scale)
-        % Detects circle location and size in image
+            % Function processImageAdvanced: 
+            % Detects a given pattern in the camera view and determines the
+            % the matched pattern's coordinates (x,y) in the frame.
 
             persistent previousX
 
@@ -210,9 +211,13 @@ classdef TurtleBotTask < handle
             [sceneFeatures, scenePoints] = extractFeatures(sceneImage, scenePoints);
 
             boxPairs = matchFeatures(boxFeatures, sceneFeatures);
+            
 
             matchedBoxPoints = boxPoints(boxPairs(:, 1), :);
             matchedScenePoints = scenePoints(boxPairs(:, 2), :);
+            
+            figure(1); ax = axes;
+            showMatchedFeatures(boxImage,sceneImage,matchedBoxPoints,matchedScenePoints,'montage','Parent',ax);
 
             if matchedScenePoints.Count < 5 
                 centerX = previousX;
@@ -232,8 +237,14 @@ classdef TurtleBotTask < handle
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         
         function [v,w] = calculateMovement(x,blobSize, laserScan,imgWidth,controlParameters, mode, state)
-        % Tracks location and distance of detected circle by assigning 
-        % linear and angular velocities
+            % Function calculateMovement:
+            % Determines the linear and angular velocities required to
+            % track the targeted object.
+            % Template used from:   
+            % MathWorks Student Competitions Team (2022). 
+            % Getting Started with MATLAB, Simulink, and ROS 
+            %(https://github.com/mathworks-robotics/getting-started-ros), GitHub. 
+            % Retrieved October 24, 2022.
 
             %% Initialize persistent variables
             persistent xBuffer xPrev sizeBuffer outlierCount tStart tFlag
@@ -270,7 +281,7 @@ classdef TurtleBotTask < handle
              sizeFilt = mean(sizeBuffer);
              xPrev = x;
 
-            %% Angular velocity control: Keep the marker centered
+            %% ANGULAR VELOCITY CALCULATION
             w = 0;
 
             if mode == "basic"
@@ -299,7 +310,7 @@ classdef TurtleBotTask < handle
                 end
             end
 
-            %% Linear velocity control: Keep the marker at a certain distance
+            %% LINEAR VELOCITY CALCULATION
             v = 0;
 
             if mode == "basic"
@@ -332,14 +343,15 @@ classdef TurtleBotTask < handle
                 end
             end
 
-            %% Scan autonomously for a while if the outlier count has been exceeded
+            %% Stop linear movement if the outlier count has been exceeded
             if mode == "basic"
                 if (blobSize == 0) || (outlierCount > 50 && outlierCount < 500)
                    v = 0;
                    w = controlParameters.maxAngVel/2; 
                 end
             end
-
+            
+            %% Stop linear movement if the pattern hasn't been detected for more than 5 seconds
             if (mode == "advanced") & (state == 0)
                 tEnd = toc(tStart);
                 if tEnd > 5
